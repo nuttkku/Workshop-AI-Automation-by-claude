@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>น้องอุทยาน · AI Agent</title>
+  <style>
+    :root { --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --muted: #667085; --brand: #2563eb; --tool: #fff7e6; --err: #fdecec; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Sarabun", system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; grid-template-columns: 1fr 340px; gap: 16px; height: 100vh; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; height: auto; } }
+    section { background: var(--card); border-radius: 12px; box-shadow: 0 1px 3px #0001; display: flex; flex-direction: column; min-height: 0; }
+    header { padding: 12px 16px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+    h1, h2 { margin: 0; font-size: 1rem; }
+    #log, #trace { flex: 1; overflow-y: auto; padding: 16px; }
+    .msg { margin: 8px 0; padding: 10px 14px; border-radius: 12px; max-width: 85%; white-space: pre-wrap; line-height: 1.5; }
+    .user { background: var(--brand); color: #fff; margin-left: auto; }
+    .bot { background: #eef2f7; }
+    .error { background: var(--err); }
+    .step { background: var(--tool); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: .85rem; }
+    .step code { display: block; white-space: pre-wrap; word-break: break-word; color: var(--muted); margin-top: 4px; }
+    form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #eee; }
+    input { flex: 1; padding: 10px 12px; border: 1px solid #d0d5dd; border-radius: 8px; font: inherit; }
+    button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--brand); color: #fff; font: inherit; cursor: pointer; }
+    button.ghost { background: none; color: var(--muted); padding: 4px 8px; }
+    button:disabled { opacity: .5; }
+    .hint { color: var(--muted); font-size: .85rem; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <header><h1>💬 น้องอุทยาน — ผู้ช่วย AI Agent</h1><button class="ghost" id="reset">เริ่มใหม่</button></header>
+    <div id="log">
+      <p class="hint">ลองพิมพ์: "เพิ่มงานส่งรายงานโครงการ ด่วน ภายในวันศุกร์นี้" · "มีงานอะไรค้างบ้าง" · "อากาศข้างนอกเป็นยังไง ควรใส่แมสก์ไหม" · "แจ้งเตือนงานด่วนเข้ามือถือหน่อย"</p>
+    </div>
+    <form id="form"><input id="input" placeholder="พิมพ์ข้อความ…" autocomplete="off" autofocus><button id="send">ส่ง</button></form>
+  </section>
+  <section>
+    <header><h2>🔧 Agent กำลังทำอะไร (tool calls)</h2></header>
+    <div id="trace"><p class="hint">ทุกครั้งที่ agent เรียกเครื่องมือ จะแสดงที่นี่</p></div>
+  </section>
+</main>
+<script>
+  const sessionId = crypto.randomUUID();
+  const $ = (id) => document.getElementById(id);
+
+  function addMsg(text, cls) {
+    const div = document.createElement("div");
+    div.className = "msg " + cls;
+    div.textContent = text;
+    $("log").appendChild(div);
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+
+  function addTrace(step) {
+    const div = document.createElement("div");
+    div.className = "step";
+    const title = document.createElement("strong");
+    title.textContent = `${step.error ? "❌" : "✅"} ${step.tool}  (${step.ms} ms)`;
+    const detail = document.createElement("code");
+    detail.textContent = "input: " + JSON.stringify(step.input) + "\n" + (step.error ? "error: " + step.error : "output: " + step.output);
+    div.append(title, detail);
+    $("trace").appendChild(div);
+    $("trace").scrollTop = $("trace").scrollHeight;
+  }
+
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const message = $("input").value.trim();
+    if (!message) return;
+    $("input").value = "";
+    $("send").disabled = true;
+    addMsg(message, "user");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId, message }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      data.trace.forEach(addTrace);
+      addMsg(data.reply || "(ไม่มีข้อความตอบกลับ)", "bot");
+    } catch (err) {
+      addMsg("⚠️ " + err.message, "bot error");
+    } finally {
+      $("send").disabled = false;
+      $("input").focus();
+    }
+  });
+
+  $("reset").addEventListener("click", async () => {
+    await fetch("/api/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId }) });
+    location.reload();
+  });
+</script>
+</body>
+</html>

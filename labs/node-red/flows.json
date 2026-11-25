@@ -1,0 +1,362 @@
+[
+  {
+    "id": "tab_lab3",
+    "type": "tab",
+    "label": "Lab 3 - AI Automation",
+    "disabled": false,
+    "info": "Workshop Lab 3: Node-RED + Claude API"
+  },
+  {
+    "id": "c1",
+    "type": "comment",
+    "z": "tab_lab3",
+    "name": "A) ทุก 30 นาที: ดึงคุณภาพอากาศ → Claude สรุป → ถ้า PM2.5 สูง ส่งต่อ n8n",
+    "info": "ต้องมี ANTHROPIC_API_KEY ใน .env และเปิด workflow 'notify' ใน n8n (Lab 4) ก่อน ส่วนส่งต่อ n8n จึงจะทำงาน",
+    "x": 330,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "inj_air",
+    "type": "inject",
+    "z": "tab_lab3",
+    "name": "ทุก 30 นาที (กดเพื่อทดสอบ)",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "1800",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 170,
+    "y": 100,
+    "wires": [
+      [
+        "http_air"
+      ]
+    ]
+  },
+  {
+    "id": "http_air",
+    "type": "http request",
+    "z": "tab_lab3",
+    "name": "Open-Meteo Air Quality",
+    "method": "GET",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=13.8156&longitude=100.5617&current=pm2_5,pm10,us_aqi&timezone=Asia%2FBangkok",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      [
+        "fn_build"
+      ]
+    ]
+  },
+  {
+    "id": "fn_build",
+    "type": "function",
+    "z": "tab_lab3",
+    "name": "สร้างคำขอถึง Claude",
+    "func": "// Build a Claude Messages API request from the air-quality reading\nconst aq = msg.payload.current;\nmsg.aq = aq;\nmsg.url = \"https://api.anthropic.com/v1/messages\";\nmsg.method = \"POST\";\nmsg.headers = {\n    \"content-type\": \"application/json\",\n    \"x-api-key\": env.get(\"ANTHROPIC_API_KEY\"),\n    \"anthropic-version\": \"2026-10-21\"\n};\nmsg.payload = {\n    model: env.get(\"CLAUDE_MODEL\") || \"claude-opus-5-5\",\n    max_tokens: 2048,\n    output_config: { effort: \"low\" },\n    system: \"คุณคือผู้ช่วยแจ้งเตือนสุขภาพของสำนักงาน ตอบภาษาไทย ไม่เกิน 3 บรรทัด ไม่ใช้ markdown\",\n    messages: [{\n        role: \"user\",\n        content: \"ข้อมูลคุณภาพอากาศล่าสุด (ลาดพร้าว): \" + JSON.stringify(aq) +\n            \"\\nสรุประดับความเสี่ยง และคำแนะนำสำหรับพนักงานที่จะออกนอกอาคาร\"\n    }]\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 650,
+    "y": 100,
+    "wires": [
+      [
+        "http_claude"
+      ]
+    ]
+  },
+  {
+    "id": "http_claude",
+    "type": "http request",
+    "z": "tab_lab3",
+    "name": "Claude Messages API",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 870,
+    "y": 100,
+    "wires": [
+      [
+        "fn_parse"
+      ]
+    ]
+  },
+  {
+    "id": "fn_parse",
+    "type": "function",
+    "z": "tab_lab3",
+    "name": "ดึงข้อความคำตอบ",
+    "func": "// Pull the text out of Claude's response (content can also hold thinking blocks)\nif (msg.statusCode !== 200) {\n    node.error(\"Claude API \" + msg.statusCode + \": \" + JSON.stringify(msg.payload), msg);\n    return null;\n}\nif (msg.payload.stop_reason === \"refusal\") {\n    node.warn(\"Claude declined this request\");\n    return null;\n}\nconst text = msg.payload.content\n    .filter(b => b.type === \"text\")\n    .map(b => b.text)\n    .join(\"\\n\")\n    .trim();\nflow.set(\"lastAir\", { at: new Date().toISOString(), aq: msg.aq, summary: text });\nmsg.payload = text;\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1080,
+    "y": 100,
+    "wires": [
+      [
+        "dbg_air",
+        "sw_pm"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_air",
+    "type": "debug",
+    "z": "tab_lab3",
+    "name": "สรุปจาก Claude",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 1290,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "sw_pm",
+    "type": "switch",
+    "z": "tab_lab3",
+    "name": "PM2.5 > 37.5 ?",
+    "property": "aq.pm2_5",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "gt",
+        "v": "37.5",
+        "vt": "num"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 1,
+    "x": 1280,
+    "y": 140,
+    "wires": [
+      [
+        "fn_notify"
+      ]
+    ]
+  },
+  {
+    "id": "fn_notify",
+    "type": "function",
+    "z": "tab_lab3",
+    "name": "payload สำหรับ n8n",
+    "func": "// Payload for the n8n 'notify' webhook (Lab 4)\nmsg.payload = {\n    source: \"node-red\",\n    title: \"PM2.5 สูง \" + msg.aq.pm2_5 + \" µg/m³\",\n    message: msg.payload\n};\nmsg.headers = { \"content-type\": \"application/json\" };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1480,
+    "y": 140,
+    "wires": [
+      [
+        "http_n8n"
+      ]
+    ]
+  },
+  {
+    "id": "http_n8n",
+    "type": "http request",
+    "z": "tab_lab3",
+    "name": "POST n8n /webhook/notify",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "http://n8n:5678/webhook/notify",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 1700,
+    "y": 140,
+    "wires": [
+      [
+        "dbg_n8n"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_n8n",
+    "type": "debug",
+    "z": "tab_lab3",
+    "name": "ผลจาก n8n",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 1900,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "c2",
+    "type": "comment",
+    "z": "tab_lab3",
+    "name": "B) API ให้ระบบอื่นเรียก: GET /air/latest (Agent App ใช้) และ POST /sensor",
+    "info": "",
+    "x": 260,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "in_latest",
+    "type": "http in",
+    "z": "tab_lab3",
+    "name": "",
+    "url": "/air/latest",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 280,
+    "wires": [
+      [
+        "fn_latest"
+      ]
+    ]
+  },
+  {
+    "id": "fn_latest",
+    "type": "function",
+    "z": "tab_lab3",
+    "name": "อ่านค่าล่าสุด",
+    "func": "msg.payload = flow.get(\"lastAir\") || { message: \"ยังไม่มีข้อมูล — กดปุ่ม inject ของ flow คุณภาพอากาศก่อน\" };\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 280,
+    "wires": [
+      [
+        "res_latest"
+      ]
+    ]
+  },
+  {
+    "id": "res_latest",
+    "type": "http response",
+    "z": "tab_lab3",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 570,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "in_sensor",
+    "type": "http in",
+    "z": "tab_lab3",
+    "name": "",
+    "url": "/sensor",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 360,
+    "wires": [
+      [
+        "fn_sensor"
+      ]
+    ]
+  },
+  {
+    "id": "fn_sensor",
+    "type": "function",
+    "z": "tab_lab3",
+    "name": "ตรวจค่าเซนเซอร์",
+    "func": "// Output 1 → HTTP response, Output 2 → alert (only when too hot)\nconst { device = \"unknown\", temp } = msg.payload || {};\nif (typeof temp !== \"number\") {\n    msg.statusCode = 400;\n    msg.payload = { ok: false, error: \"temp ต้องเป็นตัวเลข\" };\n    return [msg, null];\n}\nconst readings = flow.get(\"readings\") || [];\nreadings.push({ device, temp, at: new Date().toISOString() });\nflow.set(\"readings\", readings.slice(-100));\n\nconst alert = temp > 35;\nmsg.payload = { ok: true, device, temp, alert };\nreturn [msg, alert ? { payload: \"🔥 \" + device + \" อุณหภูมิ \" + temp + \"°C เกินเกณฑ์ 35°C\" } : null];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 360,
+    "wires": [
+      [
+        "res_sensor"
+      ],
+      [
+        "dbg_alert"
+      ]
+    ]
+  },
+  {
+    "id": "res_sensor",
+    "type": "http response",
+    "z": "tab_lab3",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 590,
+    "y": 340,
+    "wires": []
+  },
+  {
+    "id": "dbg_alert",
+    "type": "debug",
+    "z": "tab_lab3",
+    "name": "แจ้งเตือนอุณหภูมิ",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 610,
+    "y": 380,
+    "wires": []
+  }
+]

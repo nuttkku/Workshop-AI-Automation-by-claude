@@ -1,0 +1,50 @@
+# ทั้ง stack ของ workshop: docker compose up -d
+# บริการเรียกหากันด้วยชื่อบริการ (node-red, n8n, agent-app) ไม่ใช่ localhost
+name: ai-workshop
+
+services:
+  node-red:
+    image: nodered/node-red:5.0          # pin major version กันอัปเดตแล้ว flow พัง
+    ports:
+      - "1880:1880"
+    env_file: .env
+    environment:
+      TZ: Asia/Bangkok
+    volumes:
+      - node_red_data:/data
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable  # production: pin เป็นเลขเวอร์ชันจริง เช่น 2.x.y
+    ports:
+      - "5678:5678"
+    environment:
+      GENERIC_TIMEZONE: Asia/Bangkok
+      TZ: Asia/Bangkok
+      N8N_RUNNERS_ENABLED: "true"
+      # เมื่อใช้ tunnel (Lab 4 ต่อยอด Telegram) ให้ตั้ง WEBHOOK_URL ใน .env เป็น https URL ของ tunnel
+      WEBHOOK_URL: ${WEBHOOK_URL:-http://localhost:5678/}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+  agent-app:
+    build: ./apps/agent-app
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      NODE_RED_URL: http://node-red:1880
+      N8N_NOTIFY_URL: ${N8N_NOTIFY_URL:-http://n8n:5678/webhook/notify}
+      DATA_DIR: /data
+    volumes:
+      - agent_data:/data
+    depends_on:
+      - node-red
+      - n8n
+    restart: unless-stopped
+
+volumes:
+  node_red_data:
+  n8n_data:
+  agent_data:
